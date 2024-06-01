@@ -1,0 +1,112 @@
+// Require necessary modules
+const express = require('express');
+const bodyParser = require('body-parser');
+const bcrypt = require('bcrypt'); // For password hashing
+const jwt = require('jsonwebtoken'); // For JWT authentication
+const { v4: uuidv4 } = require('uuid'); // For generating unique IDs
+
+// Initialize the Express app
+const app = express();
+app.use(bodyParser.json());
+
+// Data structures to store digital cards and users
+let digitalCards = [];
+let users = [];
+
+// Middleware for authentication
+const authenticate = (req, res, next) => {
+    const authToken = req.headers['authorization'];
+    if (authToken) {
+        try {
+            const decodedToken = jwt.verify(authToken.replace('Bearer ', ''), 'mySecretKey');
+            req.userId = decodedToken.userId;
+            next();
+        } catch (error) {
+            res.status(401).json({ message: 'Invalid token' });
+        }
+    } else {
+        res.status(401).json({ message: 'Unauthorized' });
+    }
+};
+
+// Middleware for input validation
+const validateCardDetails = (req, res, next) => {
+    const cardDetails = req.body;
+    if (!cardDetails.number || !cardDetails.balance) {
+        res.status(400).json({ message: 'Card number and balance are required' });
+    } else {
+        next();
+    }
+};
+
+// Route to create a new digital card
+app.post('/digital-cards', authenticate, validateCardDetails, (req, res) => {
+    const cardDetails = req.body;
+    const existingCard = digitalCards.find(card => card.number === cardDetails.number);
+    if (existingCard) {
+        res.status(409).json({ message: 'Card number already exists' });
+    } else {
+        cardDetails.ownerId = req.userId; // Associate card with user
+        cardDetails.cardId = uuidv4(); // Generate a unique card ID
+        cardDetails.transactions = []; // Initialize transactions array
+        cardDetails.expiryDate = '2025-12-31'; // Example expiry date
+        cardDetails.isLocked = false; // Example card status
+        cardDetails.currency = 'USD'; // Example currency
+        cardDetails.rewardsPoints = 0; // Example rewards points
+        cardDetails.theme = 'classic'; // Default theme
+        cardDetails.backgroundColor = '#ffffff'; // Default background color
+        cardDetails.font = 'Arial'; // Default font
+        cardDetails.customImage = null; // Default custom image (null or URL)
+        digitalCards.push(cardDetails);
+        res.status(201).json({ message: 'Digital card created successfully' });
+    }
+});
+
+// Route to get all digital cards for a user
+app.get('/digital-cards', authenticate, (req, res) => {
+    const userCards = digitalCards.filter(card => card.ownerId === req.userId);
+    res.status(200).json(userCards);
+});
+
+// Route for card transactions (example: add funds)
+app.post('/digital-cards/transactions', authenticate, (req, res) => {
+    const { cardId, amount } = req.body;
+    const card = digitalCards.find(card => card.cardId === cardId);
+    if (!card) {
+        res.status(404).json({ message: 'Card not found' });
+    } else {
+        card.balance += amount;
+        card.transactions.push({ type: 'credit', amount });
+        res.status(200).json({ message: 'Transaction successful' });
+    }
+});
+
+// User registration route
+app.post('/register', async (req, res) => {
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = { userId: uuidv4(), username, password: hashedPassword };
+    users.push(newUser);
+    res.status(201).json({ message: 'User registered successfully' });
+});
+
+// User login route
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+    const user = users.find(u => u.username === username);
+    if (!user) {
+        res.status(401).json({ message: 'Invalid credentials' });
+    } else {
+        const passwordMatch = await bcrypt.compare(password, user.password);
+        if (passwordMatch) {
+            const token = jwt.sign({ userId: user.userId }, 'mySecretKey', { expiresIn: '1h' });
+            res.status(200).json({ message: 'Login successful', token });
+        } else {
+            res.status(401).json({ message: 'Invalid credentials' });
+        }
+    }
+});
+
+// Card customization route
+app.patch('/digital-cards/:cardId/customize', authenticate, (req, res) => {
+    const { cardId } = req
